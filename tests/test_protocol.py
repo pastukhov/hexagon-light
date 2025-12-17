@@ -37,4 +37,3 @@ def test_parse_state_tg609_sync_frame_0x56() -> None:
     assert st.is_on is True
     assert st.brightness_percent == 14
     assert st.raw == raw
-

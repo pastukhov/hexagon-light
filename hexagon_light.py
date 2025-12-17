@@ -16,7 +16,8 @@ CLI usage:
   python3 hexagon_light.py --mac FF:FF:11:52:AB:BD on
   python3 hexagon_light.py --mac FF:FF:11:52:AB:BD rgb 255 100 50
   python3 hexagon_light.py --mac FF:FF:11:52:AB:BD brightness 80
-  python3 hexagon_light.py --mac FF:FF:11:52:AB:BD --wait 2 set --power on --rgb 255 100 50 --brightness 80
+  python3 hexagon_light.py --mac FF:FF:11:52:AB:BD --wait 2 set --power on --rgb 255 100 50
+    --brightness 80
 
 Protocol (from MeRGBW app):
   - Write to service 0000fff0-0000-1000-8000-00805f9b34fb
@@ -44,11 +45,12 @@ import argparse
 import asyncio
 import colorsys
 import threading
+from collections.abc import Coroutine
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any
 
 from bleak import BleakClient
-
 
 DEFAULT_SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
 DEFAULT_WRITE_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
@@ -93,9 +95,9 @@ class _WriteConfig:
 
 @dataclass(frozen=True)
 class HexagonState:
-    is_on: Optional[bool] = None
-    brightness_percent: Optional[int] = None
-    raw: Optional[bytes] = None
+    is_on: bool | None = None
+    brightness_percent: int | None = None
+    raw: bytes | None = None
 
 
 def _clamp_int(value: int, lo: int, hi: int) -> int:
@@ -110,7 +112,7 @@ def _checksum_ff(sum_without_checksum: int) -> int:
     return (0xFF - (sum_without_checksum & 0xFF)) & 0xFF
 
 
-def _build_command(cmd: int, payload: Optional[bytes]) -> bytes:
+def _build_command(cmd: int, payload: bytes | None) -> bytes:
     if payload is None:
         payload = b""
     cmd = cmd & 0xFF
@@ -164,23 +166,20 @@ class HexagonLight:
         self._connect_retries = connect_retries
         self._retry_delay_s = retry_delay_s
 
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._thread: Optional[threading.Thread] = None
-        self._client: Optional[BleakClient] = None
-        self._write: Optional[_WriteConfig] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._client: BleakClient | None = None
+        self._write: _WriteConfig | None = None
         self._closing = False
         self._state_lock = threading.Lock()
         self._notify_event = threading.Event()
-        self._last_notify: Optional[bytes] = None
+        self._last_notify: bytes | None = None
 
     def connect(self) -> None:
         self._start_loop_thread()
         connect_timeout = (
             (self._timeout * self._connect_retries)
-            + (
-                self._retry_delay_s
-                * (self._connect_retries * (self._connect_retries + 1) / 2.0)
-            )
+            + (self._retry_delay_s * (self._connect_retries * (self._connect_retries + 1) / 2.0))
             + 10.0
         )
         self._run(self._connect_async(), timeout=connect_timeout)
@@ -206,10 +205,10 @@ class HexagonLight:
     def set_rgb(self, r: int, g: int, b: int) -> None:
         self._run(self._set_rgb_async(int(r), int(g), int(b)))
 
-    def set_scene(self, scene: int, *, speed: Optional[int] = None) -> None:
+    def set_scene(self, scene: int, *, speed: int | None = None) -> None:
         self._run(self._set_scene_async(int(scene), speed=speed))
 
-    def set_scene_by_name(self, name: str, *, speed: Optional[int] = None) -> None:
+    def set_scene_by_name(self, name: str, *, speed: int | None = None) -> None:
         key = name.strip().lower().replace(" ", "_")
         scene = SCENES_TG609.get(key)
         if scene is None:
@@ -219,9 +218,7 @@ class HexagonLight:
             raise HexagonLightError(f"Unknown scene name: {name!r}")
         self.set_scene(scene, speed=speed)
 
-    def get_state(
-        self, *, wait_s: float = 2.0, request_sync: bool = True
-    ) -> HexagonState:
+    def get_state(self, *, wait_s: float = 2.0, request_sync: bool = True) -> HexagonState:
         """
         Best-effort state read via notifications on 0xFFF4.
 
@@ -264,9 +261,7 @@ class HexagonLight:
             for task in pending:
                 task.cancel()
             if pending:
-                loop.run_until_complete(
-                    asyncio.gather(*pending, return_exceptions=True)
-                )
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             loop.close()
 
         thread = threading.Thread(target=_runner, name="hexagon-light-ble", daemon=True)
@@ -288,7 +283,7 @@ class HexagonLight:
         loop.call_soon_threadsafe(loop.stop)
         thread.join(timeout=2.0)
 
-    def _run(self, coro, *, timeout: Optional[float] = None) -> None:
+    def _run(self, coro: Coroutine[Any, Any, Any], *, timeout: float | None = None) -> None:
         with self._state_lock:
             loop = self._loop
         if loop is None:
@@ -316,13 +311,11 @@ class HexagonLight:
             self._write = None
             self._last_notify = None
         if client is not None:
-            try:
+            with suppress(Exception):
                 await client.disconnect()
-            except Exception:
-                pass
 
     async def _connect_async(self) -> None:
-        last_err: Optional[BaseException] = None
+        last_err: BaseException | None = None
         for attempt in range(1, self._connect_retries + 1):
             with self._state_lock:
                 if self._closing:
@@ -351,9 +344,7 @@ class HexagonLight:
                     svc = svcs.get_service(self._service_uuid)
                     if svc is None:
                         await client.disconnect()
-                        raise HexagonLightError(
-                            f"Service not found: {self._service_uuid}"
-                        )
+                        raise HexagonLightError(f"Service not found: {self._service_uuid}")
                     ch = svc.get_characteristic(self._write_uuid)
                     if ch is None:
                         await client.disconnect()
@@ -368,10 +359,8 @@ class HexagonLight:
                         self._last_notify = bytes(data)
                     self._notify_event.set()
 
-                try:
+                with suppress(Exception):
                     await client.start_notify(self._notify_uuid, _notify_handler)
-                except Exception:
-                    pass
 
                 with self._state_lock:
                     self._client = client
@@ -406,20 +395,16 @@ class HexagonLight:
             raise HexagonLightError("Not connected")
 
         try:
-            await client.write_gatt_char(
-                write.char_uuid, frame, response=write.response
-            )
-        except Exception:
+            await client.write_gatt_char(write.char_uuid, frame, response=write.response)
+        except Exception as err:
             self._on_disconnect(client)
             await self._ensure_connected()
             with self._state_lock:
                 client = self._client
                 write = self._write
             if client is None or write is None:
-                raise HexagonLightError("Reconnect failed")
-            await client.write_gatt_char(
-                write.char_uuid, frame, response=write.response
-            )
+                raise HexagonLightError("Reconnect failed") from err
+            await client.write_gatt_char(write.char_uuid, frame, response=write.response)
 
     async def _send_simple_power(self, on: bool) -> None:
         payload = bytes([0x01 if on else 0x00])
@@ -430,7 +415,7 @@ class HexagonLight:
         frame = _build_command(0x00, None)
         await self._write_frame(frame)
 
-    async def _set_scene_async(self, scene: int, *, speed: Optional[int]) -> None:
+    async def _set_scene_async(self, scene: int, *, speed: int | None) -> None:
         scene = _clamp_int(scene, 0, 0xFFFF)
         frame = _build_command(0x06, _u16_be(scene))
         await self._write_frame(frame)
@@ -450,13 +435,15 @@ class HexagonLight:
         frame = _build_command(0x03, payload)
         await self._write_frame(frame)
 
-    def _parse_state(self, raw: Optional[bytes]) -> HexagonState:
+    def _parse_state(self, raw: bytes | None) -> HexagonState:
         if not raw:
             return HexagonState()
         if len(raw) < 6:
             return HexagonState(raw=raw)
         if (sum(raw) & 0xFF) != 0xFF:
             return HexagonState(raw=raw)
+
+        brightness_percent: int | None = None
 
         # Some firmwares notify with 0x55 (same as outgoing), others use 0x56 for sync frames.
         if raw[0] == 0x55:
@@ -467,22 +454,20 @@ class HexagonLight:
             # For common MeRGBW devices, payload[0] is power flag (0/1) in sync frames.
             is_on = raw[4] != 0
 
-            brightness_percent: Optional[int] = None
             if len(raw) >= 7:
                 b = int(raw[5]) - 5
                 if 0 <= b <= 100:
                     brightness_percent = b
 
-            return HexagonState(
-                is_on=is_on, brightness_percent=brightness_percent, raw=raw
-            )
+            return HexagonState(is_on=is_on, brightness_percent=brightness_percent, raw=raw)
 
         if raw[0] != 0x56:
             return HexagonState(raw=raw)
 
-        # Observed on TG609-class devices: power at [4], brightness u16 at [5:7] (same encoding as cmd 0x05).
+        # Observed on TG609-class devices:
+        # - power at [4]
+        # - brightness u16 at [5:7] (same encoding as cmd 0x05)
         is_on = raw[4] != 0
-        brightness_percent: Optional[int] = None
         if len(raw) >= 8:
             value = (raw[5] << 8) | raw[6]
             b = (value // 10) - 5
@@ -530,9 +515,7 @@ def _main() -> int:
     p_set.add_argument("--rgb", nargs=3, metavar=("R", "G", "B"), type=int)
     p_set.add_argument("--brightness", dest="brightness_percent", type=int)
     p_set.add_argument("--scene", help="Scene index (int) or name (e.g. symphony)")
-    p_set.add_argument(
-        "--scene-speed", type=int, help="Optional speed 0-255 for --scene"
-    )
+    p_set.add_argument("--scene-speed", type=int, help="Optional speed 0-255 for --scene")
 
     args = parser.parse_args()
 
@@ -591,10 +574,8 @@ def _main() -> int:
             print(f"is_on={st.is_on} brightness={st.brightness_percent} raw={raw}")
         return 0
     finally:
-        try:
+        with suppress(Exception):
             lamp.disconnect()
-        except Exception:
-            pass
 
 
 if __name__ == "__main__":
