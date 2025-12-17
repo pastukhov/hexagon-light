@@ -3,14 +3,50 @@ repos:
     rev: v5.0.0
     hooks:
       - id: check-added-large-files
+      - id: check-ast
+      - id: check-json
       - id: check-merge-conflict
+      - id: check-toml
       - id: check-yaml
+      - id: debug-statements
+      - id: detect-private-key
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    # Ruff version.
+    rev: v0.14.9
     hooks:
-      - id: ruff
-        args: ["--no-fix"]
+      # Run the linter.
+      - id: ruff-check
+        args: [--fix]
+      # Run the formatter.
+      - id: ruff-format
 
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.0
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+        files: ^(hexagon_.*\.py|tests/.*\.py)$
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.2
+    hooks:
+      - id: bandit
+        args: [-q]
+        files: ^(hexagon_.*\.py)$
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        args: [--check-filenames, --check-hidden]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: python3 -m pytest
+        language: system
+        pass_filenames: false

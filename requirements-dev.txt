@@ -1,2 +1,6 @@
 pre-commit
-
+pytest
+mypy
+ruff
+bandit
+codespell
