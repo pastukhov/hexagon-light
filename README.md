@@ -16,6 +16,21 @@
 python3 -m pip install bleak
 ```
 
+## Pre-commit (проверки перед коммитом)
+
+Установка:
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+pre-commit install
+```
+
+Запуск всех проверок вручную:
+
+```bash
+pre-commit run -a
+```
+
 ## Быстрый старт (CLI)
 
 MAC по умолчанию уже задан (`FF:FF:11:52:AB:BD`), но лучше указывать явно:
